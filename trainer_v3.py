@@ -31,7 +31,7 @@ fl.DEFINE_boolean('test', False, '')
 #######################
 
 fl.DEFINE_string('model_name', 'inception_resnet_v2', '')
-fl.DEFINE_string('preprocessing_name', 'vgg', '')
+fl.DEFINE_string('preprocessing_name', 'inception', '')
 fl.DEFINE_integer('batch_size', 64, '')
 fl.DEFINE_boolean('use_pair_sampling', True, '')
 fl.DEFINE_integer('sampling_buffer_size', 300, '')
@@ -44,7 +44,7 @@ fl.DEFINE_integer('keep_checkpoint_max', 200, '')
 #######################
 # Triplet #
 #######################
-fl.DEFINE_integer('embedding_size', 32, '')
+fl.DEFINE_integer('embedding_size', 128, '')
 fl.DEFINE_string('triplet_strategy', 'semihard', '')
 fl.DEFINE_float('margin', 0.5, '')
 fl.DEFINE_boolean('squared', False, '')
@@ -56,7 +56,7 @@ fl.DEFINE_boolean('l2norm', True, '')
 
 # fl.DEFINE_float('weight_decay', 0.00004, '')
 # fl.DEFINE_float('weight_decay', 0.0002, '')
-fl.DEFINE_float('weight_decay', 0.00055, '')
+fl.DEFINE_float('weight_decay', 0.0004, '')
 fl.DEFINE_string('optimizer', 'momentum', '"adadelta", "adagrad", "adam",''"ftrl", "momentum", "sgd"  "rmsprop".')
 fl.DEFINE_float('adadelta_rho', 0.95, 'The decay rate for adadelta.')
 fl.DEFINE_float('adagrad_initial_accumulator_value', 0.1, 'Starting value for the AdaGrad accumulators.')
@@ -90,10 +90,10 @@ fl.DEFINE_float('moving_average_decay', None, 'The decay to use for the moving a
 #####################
 # Fine-Tuning Flags #
 #####################
-# fl.DEFINE_string('nsml_checkpoint', '10', '')
-# fl.DEFINE_string('nsml_session', 'jireh_family/ir_ph1_v2/156', '')
-fl.DEFINE_string('nsml_checkpoint', None, '')
-fl.DEFINE_string('nsml_session', None, '')
+fl.DEFINE_string('nsml_checkpoint', '73', '')
+fl.DEFINE_string('nsml_session', 'jireh_family/ir_ph1_v2/251', '')
+# fl.DEFINE_string('nsml_checkpoint', None, '')
+# fl.DEFINE_string('nsml_session', None, '')
 fl.DEFINE_boolean('fine_tuning', True, '')
 fl.DEFINE_string('checkpoint_path', "./pretrained/inception_resnet_v2_2016_08_30.ckpt", '')
 # fl.DEFINE_string('checkpoint_path', None, '')
@@ -194,13 +194,16 @@ def bind_model(saver, sess, images_ph, embeddings_op, cf):
             reference_vecs = sess.run(embeddings_op, feed_dict=feed_dict)
             with open(db_output, 'wb') as f:
                 pickle.dump(reference_vecs, f)
-
+        dot_product = np.matmul(query_vecs, np.transpose(reference_vecs))
+        square_norm = np.diag(dot_product)
+        distances = np.expand_dims(square_norm, 1) - 2.0 * dot_product + np.expand_dims(square_norm, 0)
+        sim_matrix = np.maximum(distances, 0.0)
         # l2 normalization
-        query_vecs = l2_normalize(query_vecs)
-        reference_vecs = l2_normalize(reference_vecs)
+        # query_vecs = l2_normalize(query_vecs)
+        # reference_vecs = l2_normalize(reference_vecs)
 
         # Calculate cosine similarity
-        sim_matrix = np.dot(query_vecs, reference_vecs.T)
+        # sim_matrix = np.dot(query_vecs, reference_vecs.T)
 
         retrieval_results = {}
 
@@ -233,64 +236,8 @@ if __name__ == '__main__':
 
     # tf.set_random_seed(123)
     if cf.mode == 'train':
-        train_dataset_path = DATASET_PATH + '/train/train_data'
-        tb.make_tfrecords("ir_ph1_v2", "train", train_dataset_path, "./dataset/train/", 4, 3, False)
-
-        files = glob.glob("./dataset/train/*_train*tfrecord")
-        print(files)
-        files.sort()
-        assert len(files) > 0
-        num_examples = util.count_records(files)
+        num_examples = 1
         global_step = tf.Variable(0, trainable=False)
-
-        image_preprocessing_fn = None
-        if cf.preprocessing_name:
-            image_preprocessing_fn = preprocessing_factory.get_preprocessing(cf.preprocessing_name, is_training=True)
-
-
-        def train_pre_process(example_proto):
-            features = {"image/encoded": tf.FixedLenFeature((), tf.string, default_value=""),
-                        "image/class/label": tf.FixedLenFeature((), tf.int64, default_value=0),
-                        'image/height': tf.FixedLenFeature((), tf.int64, default_value=0),
-                        'image/width': tf.FixedLenFeature((), tf.int64, default_value=0)
-                        }
-
-            parsed_features = tf.parse_single_example(example_proto, features)
-            image = tf.image.decode_jpeg(parsed_features["image/encoded"], cf.train_image_channel)
-
-            if image_preprocessing_fn is not None:
-                image = image_preprocessing_fn(image, cf.train_image_size, cf.train_image_size)
-            else:
-                image = tf.cast(image, tf.float32)
-
-                image = tf.expand_dims(image, 0)
-                image = tf.image.resize_image_with_pad(image, cf.train_image_size, cf.train_image_size)
-                image = tf.squeeze(image, [0])
-
-                image = tf.divide(image, 255.0)
-                image = tf.subtract(image, 0.5)
-                image = tf.multiply(image, 2.0)
-
-            label = parsed_features["image/class/label"]
-            return image, label
-
-
-        steps_each_epoch = int(num_examples / cf.batch_size)
-        if num_examples % cf.batch_size > 0:
-            steps_each_epoch += 1
-        dataset = tf.data.TFRecordDataset(files)
-        dataset = dataset.map(train_pre_process, num_parallel_calls=cf.num_preprocessing_threads)
-        dataset = dataset.shuffle(cf.shuffle_buffer_size)
-        dataset = dataset.repeat()
-        if cf.use_pair_sampling:
-            dataset = dataset.batch(cf.sampling_buffer_size)
-            dataset = dataset.prefetch(cf.sampling_buffer_size * 8)
-        else:
-            dataset = dataset.batch(cf.batch_size)
-            dataset = dataset.prefetch(cf.batch_size * 8)
-
-        iterator = dataset.make_one_shot_iterator()
-        images, labels = iterator.get_next()
     else:
         num_examples = None
         global_step = None
@@ -299,12 +246,8 @@ if __name__ == '__main__':
                                name="inputs")
     labels_ph = tf.placeholder(tf.int32, [None], name="labels")
     if cf.mode == 'train':
-        if cf.use_pair_sampling:
-            loss_op, end_points, train_op, embeddings_op = model_fn.build_model(images_ph, labels_ph, cf, True,
-                                                                                num_examples, global_step)
-        else:
-            loss_op, end_points, train_op, embeddings_op = model_fn.build_model(images, labels, cf, True, num_examples,
-                                                                                global_step)
+        loss_op, end_points, train_op, embeddings_op = model_fn.build_model(images_ph, labels_ph, cf, True,
+                                                                            num_examples, global_step)
     else:
         embeddings_op = model_fn.build_model(images_ph, labels_ph, cf, is_training=False)
 
@@ -361,66 +304,5 @@ if __name__ == '__main__':
         bTrainmode = True
         if cf.nsml_checkpoint is not None and cf.nsml_session is not None:
             nsml.load(checkpoint=cf.nsml_checkpoint, session=cf.nsml_session)
-        while True:
-            try:
-                start = time.time()
-
-                if cf.use_pair_sampling:
-                    print("pair sampling")
-                    tmp_images, tmp_labels = sess.run([images, labels])
-                    pair_indices = set()
-                    single_index_map = {}
-                    label_buffer = {}
-                    for i, tmp_label in enumerate(tmp_labels):
-                        if tmp_label in label_buffer:
-                            pair_indices.add(i)
-                            pair_indices.add(label_buffer[tmp_label])
-                            if tmp_label in single_index_map:
-                                del single_index_map[tmp_label]
-                        else:
-                            label_buffer[tmp_label] = i
-                            single_index_map[tmp_label] = i
-                    pair_indices = list(pair_indices)
-                    print(len(pair_indices))
-                    if len(pair_indices) > cf.batch_size:
-                        pair_indices = pair_indices[:cf.batch_size]
-                    elif len(pair_indices) < cf.batch_size:
-                        pair_indices += list(single_index_map.values())[:cf.batch_size - len(pair_indices)]
-                    batch_images = tmp_images[pair_indices]
-                    batch_labels = tmp_labels[pair_indices]
-                else:
-                    print("not pair sampling")
-                sampling_time = time.time() - start
-                tmp_images = None
-                tmp_labels = None
-                start = time.time()
-                if cf.use_pair_sampling:
-                    feed_dict = {images_ph: batch_images, labels_ph: batch_labels}
-                    loss, _ = sess.run([loss_op, train_op], feed_dict=feed_dict)
-                else:
-                    loss, _ = sess.run([loss_op, train_op])
-                train_time = time.time() - start
-
-                if steps % cf.log_every_n_steps == 0:
-                    now = datetime.now().strftime('%Y/%m/%d %H:%M:%S')
-                    print("[%s: %d epoch(%d/%d), %d steps] sampling time: %f, train time: %f, loss: %f" % (
-                        now, epoch, steps % steps_each_epoch, steps_each_epoch, steps, sampling_time, train_time, loss))
-                num_trained_images += cf.batch_size
-
-                steps += 1
-                if num_trained_images >= num_examples:
-                    # nsml.report(summary=True, epoch=epoch, epoch_total=cf.max_number_of_epochs, loss=loss)
-
-                    if cf.save_interval_epochs >= 1 and (
-                      epoch - latest_epoch) % cf.save_interval_epochs == 0:
-                        nsml.save(epoch)
-                    if epoch >= cf.max_number_of_epochs:
-                        break
-                    epoch += 1
-                    num_trained_images = 0
-                if cf.test:
-                    nsml.save(epoch)
-                    break
-            except tf.errors.OutOfRangeError:
-                break
+            nsml.save('restored')
     print("end!!")

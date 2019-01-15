@@ -305,11 +305,12 @@ def preprocess_for_train(image,
   Returns:
     A preprocessed image.
   """
+  print("preprocessing for train")
   resize_side = tf.random_uniform(
       [], minval=resize_side_min, maxval=resize_side_max+1, dtype=tf.int32)
 
   image = _aspect_preserving_resize(image, resize_side)
-  image = _random_crop([image], output_height, output_width)[0]
+  # image = _random_crop([image], output_height, output_width)[0]
   image.set_shape([output_height, output_width, 3])
   image = tf.to_float(image)
   image = tf.image.random_flip_left_right(image)
@@ -317,11 +318,11 @@ def preprocess_for_train(image,
   #add augs
   image = tf.image.random_flip_up_down(image)
   image = tf.image.random_brightness(image, 0.2)
-  image = tf.image.random_contrast(image, 0.2, 0.8)
-  image = tf.image.random_saturation(image, 0.2, 0.8)
+  image = tf.image.random_contrast(image, 0.4, 0.6)
+  image = tf.image.random_saturation(image, 0.4, 0.6)
   angle = tf.random_uniform((), minval=0, maxval=20)
   image = tf.contrib.image.rotate(image, angle)
-  
+
   return _mean_image_subtraction(image, [_R_MEAN, _G_MEAN, _B_MEAN])
 
 

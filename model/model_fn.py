@@ -154,7 +154,7 @@ def train_op_fun(total_loss, global_step, num_examples, cf):
     return train_op
 
 
-def build_model(features, labels, cf, is_training=True, num_examples=None, global_step=None):
+def build_model(features, labels=None, cf=None, is_training=True, num_examples=None, global_step=None):
     images = features
 
     embeddings, end_points = build_slim_model(is_training, images, cf)
