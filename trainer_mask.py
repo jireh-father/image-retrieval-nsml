@@ -382,6 +382,8 @@ if __name__ == '__main__':
                     indices_not_equal = tf.logical_not(indices_equal)
                     labels_equal = tf.equal(tf.expand_dims(labels, 0), tf.expand_dims(labels, 1))
                     mask = tf.logical_and(indices_not_equal, labels_equal)
+                    tf.where(tf.equal(tf.reduce_sum(mask, axis=0), [True]))
+
                     print(mask)
                     sys.exit()
                     tmp_images, tmp_labels = sess.run([images, labels])

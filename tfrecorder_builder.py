@@ -24,6 +24,39 @@ def _dataset_exists(dataset_name, output_dir, phase_name, num_shards):
     return True
 
 
+def _get_filenames_and_labels(image_dir):
+    root = image_dir
+    directories = []
+    class_names = []
+    for filename in os.listdir(root):
+        path = os.path.join(root, filename)
+        if os.path.isdir(path):
+            directories.append(path)
+            class_names.append(filename)
+
+    class_names_to_ids = dict(zip(class_names, range(len(class_names))))
+
+    photo_filenames = []
+    labels = []
+    # todo: handle both uppercase and lowercase
+    if os.name == 'nt':
+        exts = ["jpg", "jpeg"]
+    else:
+        exts = ["jpg", "JPEG", "JPG", "jpeg"]
+    for directory in directories:
+        for ext in exts:
+            for path in glob.glob(os.path.join(directory, "*.%s" % ext)):
+                # path = os.path.join(directory, filename)
+                photo_filenames.append(path)
+    random.seed(0)
+    random.shuffle(photo_filenames)
+
+    for photo_filename in photo_filenames:
+        labels.append(class_names_to_ids[os.path.basename(os.path.dirname(photo_filename))])
+
+    return photo_filenames, labels
+
+
 def _get_filenames_and_classes(image_dir):
     root = image_dir
     directories = []
@@ -198,6 +231,12 @@ def make_tfrecords_train_test(dataset_name, train_ratio, image_dir, output_dir, 
     if remove_images:
         _clean_up_temporary_files(image_dir)
     return True
+
+
+def get_filenames_and_labels(image_dir):
+    photo_filenames, labels = _get_filenames_and_labels(image_dir)
+
+    return photo_filenames, labels
 
 
 def make_tfrecords(dataset_name, phase_name, image_dir, output_dir, num_shards, num_channels, remove_images,

@@ -11,8 +11,6 @@ import nsml
 import tfrecorder_builder as tb
 from nsml import DATASET_PATH
 import pickle
-from sklearn.neighbors import KDTree
-from sklearn.neighbors import BallTree
 
 slim = tf.contrib.slim
 
@@ -26,7 +24,7 @@ fl.DEFINE_string('mode', 'train', 'submit일때 해당값이 test로 설정됩�
 fl.DEFINE_string('iteration', '0',
                  'fork 명령어를 입력할때의 체크포인트로 설정됩니다. 체크포인트 옵션을 안주면 마지막 wall time 의 model 을 가져옵니다.')
 fl.DEFINE_integer('pause', 0, 'model 을 load 할때 1로 설정됩니다.')
-fl.DEFINE_boolean('test', True, '')
+fl.DEFINE_boolean('test', False, '')
 
 #######################
 # Dataset Flags #
@@ -37,7 +35,7 @@ fl.DEFINE_string('preprocessing_name', 'inception', '')
 fl.DEFINE_integer('batch_size', 64, '')
 fl.DEFINE_integer('eval_batch_size', 128, '')
 fl.DEFINE_boolean('use_pair_sampling', True, '')
-fl.DEFINE_integer('sampling_buffer_size', 200, '')
+fl.DEFINE_integer('sampling_buffer_size', 300, '')
 fl.DEFINE_integer('shuffle_buffer_size', 700, '')  # default 500
 fl.DEFINE_integer('train_image_channel', 3, '')
 fl.DEFINE_integer('train_image_size', 299, '')  # pnasnet_large 331, inception_resnet 299, resnet 224
@@ -52,7 +50,6 @@ fl.DEFINE_string('triplet_strategy', 'semihard', '')
 fl.DEFINE_float('margin', 0.5, '')
 fl.DEFINE_boolean('squared', False, '')
 fl.DEFINE_boolean('l2norm', True, '')
-fl.DEFINE_integer('leaf_size', 5, '')
 
 ######################
 # Optimization Flags #
@@ -94,10 +91,10 @@ fl.DEFINE_float('moving_average_decay', None, 'The decay to use for the moving a
 #####################
 # Fine-Tuning Flags #
 #####################
-fl.DEFINE_string('nsml_checkpoint', '3', '')
-fl.DEFINE_string('nsml_session', 'jireh_family/ir_ph2/11', '')
-# fl.DEFINE_string('nsml_checkpoint', None, '')
-# fl.DEFINE_string('nsml_session', None, '')
+# fl.DEFINE_string('nsml_checkpoint', '73', '')
+# fl.DEFINE_string('nsml_session', 'jireh_family/ir_ph1_v2/251', '')
+fl.DEFINE_string('nsml_checkpoint', None, '')
+fl.DEFINE_string('nsml_session', None, '')
 fl.DEFINE_boolean('fine_tuning', True, '')
 fl.DEFINE_string('checkpoint_path', "./pretrained/inception_resnet_v2_2016_08_30.ckpt", '')
 # fl.DEFINE_string('checkpoint_path', None, '')
@@ -217,20 +214,17 @@ def bind_model(saver, sess, images_ph, embeddings_op, cf):
         query_vecs = l2_normalize(query_vecs)
         reference_vecs = l2_normalize(reference_vecs)
 
-        # kdt = KDTree(reference_vecs, leaf_size=30, metric='euclidean')
-        #
-        # kdt.query(query_vecs, k=2, return_distance=False)
-
-        tree = BallTree(reference_vecs, leaf_size=cf.leaf_size)
-        k = len(queries) if len(queries) < 1000 else 1000
-        _, index_list = tree.query(query_vecs, k=k)
+        # Calculate cosine similarity
+        sim_matrix = np.dot(query_vecs, reference_vecs.T)
 
         retrieval_results = {}
-        print("searched")
-        db = np.array(db)
-        for (i, ind) in enumerate(index_list):
-            query = queries[i].split('/')[-1].split('.')[0]
-            ranked_list = [k.split('/')[-1].split('.')[0] for k in db[ind]]  # ranked list
+
+        for (i, query) in enumerate(queries):
+            query = query.split('/')[-1].split('.')[0]
+            sim_list = zip(db, sim_matrix[i].tolist())
+            sorted_sim_list = sorted(sim_list, key=lambda x: x[1], reverse=True)
+
+            ranked_list = [k.split('/')[-1].split('.')[0] for (k, v) in sorted_sim_list]  # ranked list
 
             retrieval_results[query] = ranked_list
         print('done')
@@ -258,8 +252,6 @@ if __name__ == '__main__':
         file_names, labels = tb.get_filenames_and_labels(train_dataset_path)
         print("files", len(file_names))
         print("labels", len(labels))
-        print(file_names[:10])
-        print(labels[:10])
         num_examples = len(file_names)
         global_step = tf.Variable(0, trainable=False)
 
@@ -379,69 +371,66 @@ if __name__ == '__main__':
         bTrainmode = True
         if cf.nsml_checkpoint is not None and cf.nsml_session is not None:
             nsml.load(checkpoint=cf.nsml_checkpoint, session=cf.nsml_session)
-        if cf.test:
-            nsml.save("test")
-            print("test saved!")
-        else:
-            while True:
-                try:
-                    start = time.time()
+        while True:
+            try:
+                start = time.time()
 
-                    if cf.use_pair_sampling:
-                        print("pair sampling")
-                        tmp_images, tmp_labels = sess.run([images, labels])
-                        pair_indices = set()
-                        single_index_map = {}
-                        label_buffer = {}
-                        for i, tmp_label in enumerate(tmp_labels):
-                            if tmp_label in label_buffer:
-                                pair_indices.add(i)
-                                pair_indices.add(label_buffer[tmp_label])
-                                if tmp_label in single_index_map:
-                                    del single_index_map[tmp_label]
-                            else:
-                                label_buffer[tmp_label] = i
-                                single_index_map[tmp_label] = i
-                        pair_indices = list(pair_indices)
-                        print(len(pair_indices))
-                        if len(pair_indices) > cf.batch_size:
-                            pair_indices = pair_indices[:cf.batch_size]
-                        elif len(pair_indices) < cf.batch_size:
-                            pair_indices += list(single_index_map.values())[:cf.batch_size - len(pair_indices)]
-                        batch_images = tmp_images[pair_indices]
-                        batch_labels = tmp_labels[pair_indices]
-                    else:
-                        print("not pair sampling")
-                    sampling_time = time.time() - start
-                    tmp_images = None
-                    tmp_labels = None
-                    start = time.time()
-                    if cf.use_pair_sampling:
-                        feed_dict = {images_ph: batch_images, labels_ph: batch_labels}
-                        loss, _ = sess.run([loss_op, train_op], feed_dict=feed_dict)
-                    else:
-                        loss, _ = sess.run([loss_op, train_op])
-                    train_time = time.time() - start
+                if cf.use_pair_sampling:
+                    print("pair sampling")
+                    tmp_images, tmp_labels = sess.run([images, labels])
+                    pair_indices = set()
+                    single_index_map = {}
+                    label_buffer = {}
+                    for i, tmp_label in enumerate(tmp_labels):
+                        if tmp_label in label_buffer:
+                            pair_indices.add(i)
+                            pair_indices.add(label_buffer[tmp_label])
+                            if tmp_label in single_index_map:
+                                del single_index_map[tmp_label]
+                        else:
+                            label_buffer[tmp_label] = i
+                            single_index_map[tmp_label] = i
+                    pair_indices = list(pair_indices)
+                    print(len(pair_indices))
+                    if len(pair_indices) > cf.batch_size:
+                        pair_indices = pair_indices[:cf.batch_size]
+                    elif len(pair_indices) < cf.batch_size:
+                        pair_indices += list(single_index_map.values())[:cf.batch_size - len(pair_indices)]
+                    batch_images = tmp_images[pair_indices]
+                    batch_labels = tmp_labels[pair_indices]
+                else:
+                    print("not pair sampling")
+                sampling_time = time.time() - start
+                tmp_images = None
+                tmp_labels = None
+                start = time.time()
+                if cf.use_pair_sampling:
+                    feed_dict = {images_ph: batch_images, labels_ph: batch_labels}
+                    loss, _ = sess.run([loss_op, train_op], feed_dict=feed_dict)
+                else:
+                    loss, _ = sess.run([loss_op, train_op])
+                train_time = time.time() - start
 
-                    if steps % cf.log_every_n_steps == 0:
-                        now = datetime.now().strftime('%Y/%m/%d %H:%M:%S')
-                        print("[%s: %d epoch(%d/%d), %d steps] sampling time: %f, train time: %f, loss: %f" % (
-                            now, epoch, steps % steps_each_epoch, steps_each_epoch, steps, sampling_time, train_time,
-                            loss))
-                    num_trained_images += cf.batch_size
+                if steps % cf.log_every_n_steps == 0:
+                    now = datetime.now().strftime('%Y/%m/%d %H:%M:%S')
+                    print("[%s: %d epoch(%d/%d), %d steps] sampling time: %f, train time: %f, loss: %f" % (
+                        now, epoch, steps % steps_each_epoch, steps_each_epoch, steps, sampling_time, train_time, loss))
+                num_trained_images += cf.batch_size
 
-                    steps += 1
-                    if num_trained_images >= num_examples:
-                        # nsml.report(summary=True, epoch=epoch, epoch_total=cf.max_number_of_epochs, loss=loss)
+                steps += 1
+                if num_trained_images >= num_examples:
+                    # nsml.report(summary=True, epoch=epoch, epoch_total=cf.max_number_of_epochs, loss=loss)
 
-                        if cf.save_interval_epochs >= 1 and (
-                          epoch - latest_epoch) % cf.save_interval_epochs == 0:
-                            nsml.save(epoch)
-                        if epoch >= cf.max_number_of_epochs:
-                            break
-                        epoch += 1
-                        num_trained_images = 0
-
-                except tf.errors.OutOfRangeError:
+                    if cf.save_interval_epochs >= 1 and (
+                      epoch - latest_epoch) % cf.save_interval_epochs == 0:
+                        nsml.save(epoch)
+                    if epoch >= cf.max_number_of_epochs:
+                        break
+                    epoch += 1
+                    num_trained_images = 0
+                if cf.test:
+                    nsml.save(epoch)
                     break
+            except tf.errors.OutOfRangeError:
+                break
     print("end!!")
