@@ -7,9 +7,9 @@ from datetime import datetime
 import time
 import numpy as np
 from preprocessing import preprocessing_factory
-import nsml
-import tfrecorder_builder as tb
-from nsml import DATASET_PATH
+# import nsml
+# import tfrecorder_builder as tb
+# from nsml import DATASET_PATH
 import pickle
 
 slim = tf.contrib.slim
@@ -32,10 +32,10 @@ fl.DEFINE_boolean('test', False, '')
 
 fl.DEFINE_string('model_name', 'alexnet_v2', '')
 fl.DEFINE_string('preprocessing_name', None, '')
-fl.DEFINE_integer('batch_size', 128, '')
+fl.DEFINE_integer('batch_size', 8, '')
 fl.DEFINE_boolean('use_pair_sampling', True, '')
-fl.DEFINE_integer('sampling_buffer_size', 500, '')
-fl.DEFINE_integer('shuffle_buffer_size', 1000, '')  # default 500
+fl.DEFINE_integer('sampling_buffer_size', 50, '')
+fl.DEFINE_integer('shuffle_buffer_size', 100, '')  # default 500
 fl.DEFINE_integer('train_image_channel', 3, '')
 fl.DEFINE_integer('train_image_size', 224, '')  # pnasnet_large 331, inception_resnet 299, resnet 224
 fl.DEFINE_integer('max_number_of_epochs', 100, '')
@@ -239,10 +239,10 @@ if __name__ == '__main__':
 
     # tf.set_random_seed(123)
     if cf.mode == 'train':
-        train_dataset_path = DATASET_PATH + '/train/train_data'
-        tb.make_tfrecords("ir_ph1_v2", "train", train_dataset_path, "./dataset/train/", 4, 3, False)
-
-        files = glob.glob("./dataset/train/*_train*tfrecord")
+        # train_dataset_path = DATASET_PATH + '/train/train_data'
+        # tb.make_tfrecords("ir_ph1_v2", "train", train_dataset_path, "./dataset/train/", 4, 3, False)
+        files = glob.glob("E:\cafe24bak\outbackup_d\dataset\cafe24product_test/*.tfrecord")
+        # files = glob.glob("./dataset/train/*_train*tfrecord")
         print(files)
         files.sort()
         assert len(files) > 0
@@ -361,22 +361,29 @@ if __name__ == '__main__':
     saver = tf.train.Saver(tf.global_variables(), max_to_keep=cf.keep_checkpoint_max)
     num_trained_images = 0
 
-    bind_model(saver, sess, images_ph, embeddings_op, cf)
+    # bind_model(saver, sess, images_ph, embeddings_op, cf)
 
-    if cf.pause:
-        nsml.paused(scope=locals())
+    # if cf.pause:
+    #     nsml.paused(scope=locals())
 
     bTrainmode = False
     if cf.mode == 'train':
         bTrainmode = True
-        if cf.nsml_checkpoint is not None and cf.nsml_session is not None:
-            nsml.load(checkpoint=cf.nsml_checkpoint, session=cf.nsml_session)
+        # if cf.nsml_checkpoint is not None and cf.nsml_session is not None:
+        #     nsml.load(checkpoint=cf.nsml_checkpoint, session=cf.nsml_session)
         while True:
             try:
                 start = time.time()
 
                 if cf.use_pair_sampling:
                     print("pair sampling")
+                    print(labels)
+                    indices_equal = tf.cast(tf.eye(tf.shape(labels)[0]), tf.bool)
+                    indices_not_equal = tf.logical_not(indices_equal)
+                    labels_equal = tf.equal(tf.expand_dims(labels, 0), tf.expand_dims(labels, 1))
+                    mask = tf.logical_and(indices_not_equal, labels_equal)
+                    print(mask)
+                    sys.exit()
                     tmp_images, tmp_labels = sess.run([images, labels])
                     pair_indices = set()
                     single_index_map = {}

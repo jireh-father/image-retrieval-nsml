@@ -30,21 +30,22 @@ fl.DEFINE_boolean('test', False, '')
 # Dataset Flags #
 #######################
 
-fl.DEFINE_string('model_name', 'alexnet_v2', '')
-fl.DEFINE_string('preprocessing_name', None, '')
-fl.DEFINE_integer('batch_size', 128, '')
+fl.DEFINE_string('model_name', 'inception_resnet_v2', '')
+fl.DEFINE_string('preprocessing_name', 'inception', '')
+fl.DEFINE_integer('batch_size', 64, '')
+fl.DEFINE_integer('eval_batch_size', 128, '')
 fl.DEFINE_boolean('use_pair_sampling', True, '')
-fl.DEFINE_integer('sampling_buffer_size', 500, '')
-fl.DEFINE_integer('shuffle_buffer_size', 1000, '')  # default 500
+fl.DEFINE_integer('sampling_buffer_size', 600, '')
+fl.DEFINE_integer('shuffle_buffer_size', 700, '')  # default 500
 fl.DEFINE_integer('train_image_channel', 3, '')
-fl.DEFINE_integer('train_image_size', 224, '')  # pnasnet_large 331, inception_resnet 299, resnet 224
-fl.DEFINE_integer('max_number_of_epochs', 100, '')
-fl.DEFINE_integer('keep_checkpoint_max', 100, '')
+fl.DEFINE_integer('train_image_size', 299, '')  # pnasnet_large 331, inception_resnet 299, resnet 224
+fl.DEFINE_integer('max_number_of_epochs', 200, '')
+fl.DEFINE_integer('keep_checkpoint_max', 200, '')
 
 #######################
 # Triplet #
 #######################
-fl.DEFINE_integer('embedding_size', 32, '')
+fl.DEFINE_integer('embedding_size', 128, '')
 fl.DEFINE_string('triplet_strategy', 'semihard', '')
 fl.DEFINE_float('margin', 0.5, '')
 fl.DEFINE_boolean('squared', False, '')
@@ -56,7 +57,7 @@ fl.DEFINE_boolean('l2norm', True, '')
 
 # fl.DEFINE_float('weight_decay', 0.00004, '')
 # fl.DEFINE_float('weight_decay', 0.0002, '')
-fl.DEFINE_float('weight_decay', 0.00005, '')
+fl.DEFINE_float('weight_decay', 0.00004, '')
 fl.DEFINE_string('optimizer', 'momentum', '"adadelta", "adagrad", "adam",''"ftrl", "momentum", "sgd"  "rmsprop".')
 fl.DEFINE_float('adadelta_rho', 0.95, 'The decay rate for adadelta.')
 fl.DEFINE_float('adagrad_initial_accumulator_value', 0.1, 'Starting value for the AdaGrad accumulators.')
@@ -67,8 +68,8 @@ fl.DEFINE_float('ftrl_learning_rate_power', -0.5, 'The learning rate power.')
 fl.DEFINE_float('ftrl_initial_accumulator_value', 0.1, 'Starting value for the FTRL accumulators.')
 fl.DEFINE_float('ftrl_l1', 0.0, 'The FTRL l1 regularization strength.')
 fl.DEFINE_float('ftrl_l2', 0.0, 'The FTRL l2 regularization strength.')
-# fl.DEFINE_float('momentum', 0.9, 'The momentum for the MomentumOptimizer and RMSPropOptimizer.')
-fl.DEFINE_float('momentum', 0.5, 'The momentum for the MomentumOptimizer and RMSPropOptimizer.')
+fl.DEFINE_float('momentum', 0.9, 'The momentum for the MomentumOptimizer and RMSPropOptimizer.')
+# fl.DEFINE_float('momentum', 0.5, 'The momentum for the MomentumOptimizer and RMSPropOptimizer.')
 fl.DEFINE_float('rmsprop_momentum', 0.9, 'Momentum.')
 fl.DEFINE_float('rmsprop_decay', 0.9, 'Decay term for RMSProp.')
 
@@ -76,10 +77,10 @@ fl.DEFINE_float('rmsprop_decay', 0.9, 'Decay term for RMSProp.')
 # Learning Rate Flags #
 #######################
 fl.DEFINE_string('learning_rate_decay_type', 'exponential', '"fixed", "exponential",'' or "polynomial"')
-fl.DEFINE_float('learning_rate', 0.01, 'Initial learning rate.')
+# fl.DEFINE_float('learning_rate', 0.01, 'Initial learning rate.')
 # fl.DEFINE_float('learning_rate', 0.1, 'Initial learning rate.')
 # fl.DEFINE_float('learning_rate', 0.000754, 'Initial learning rate.')
-# fl.DEFINE_float('learning_rate', 0.0051, 'Initial learning rate.')
+fl.DEFINE_float('learning_rate', 0.005, 'Initial learning rate.')
 # fl.DEFINE_float('learning_rate', 0.000754, 'Initial learning rate.')
 # fl.DEFINE_float('end_learning_rate', 0.0001, 'The minimal end learning rate used by a polynomial decay.')
 fl.DEFINE_float('end_learning_rate', 0.00001, 'The minimal end learning rate used by a polynomial decay.')
@@ -94,7 +95,7 @@ fl.DEFINE_float('moving_average_decay', None, 'The decay to use for the moving a
 # fl.DEFINE_string('nsml_session', 'jireh_family/ir_ph1_v2/251', '')
 fl.DEFINE_string('nsml_checkpoint', None, '')
 fl.DEFINE_string('nsml_session', None, '')
-fl.DEFINE_boolean('fine_tuning', False, '')
+fl.DEFINE_boolean('fine_tuning', True, '')
 fl.DEFINE_string('checkpoint_path', "./pretrained/inception_resnet_v2_2016_08_30.ckpt", '')
 # fl.DEFINE_string('checkpoint_path', None, '')
 # fl.DEFINE_string('checkpoint_exclude_scopes', None,
@@ -168,37 +169,46 @@ def bind_model(saver, sess, images_ph, embeddings_op, cf):
 
         dataset_queries = tf.data.Dataset.from_tensor_slices(queries)
         dataset_queries = dataset_queries.map(_parse_function)
-        dataset_queries = dataset_queries.batch(len(queries))
+        dataset_queries = dataset_queries.batch(cf.eval_batch_size)
         iterator = dataset_queries.make_one_shot_iterator()
         features = iterator.get_next()
-        query_imgs = sess.run(features)
 
         dataset_db = tf.data.Dataset.from_tensor_slices(db)
         dataset_db = dataset_db.map(_parse_function)
-        dataset_db = dataset_db.batch(len(db))
+        dataset_db = dataset_db.batch(cf.eval_batch_size)
         iterator_db = dataset_db.make_one_shot_iterator()
         features_db = iterator_db.get_next()
-        db_imgs = sess.run(features_db)
 
-        feed_dict = {images_ph: query_imgs}
-        query_vecs = sess.run(embeddings_op, feed_dict=feed_dict)
+        query_steps = int(len(queries) / cf.eval_batch_size)
+        if len(queries) % cf.eval_batch_size > 0:
+            query_steps += 1
 
-        print('test data load queries {} query_img {} references {} reference_img {}'.
-              format(len(queries), len(query_imgs), len(db), len(db_imgs)))
+        query_vecs = np.zeros((len(queries), int(cf.embedding_size)))
+
+        for i in range(query_steps):
+            query_imgs = sess.run(features)
+            feed_dict = {images_ph: query_imgs}
+            tmp_query_vecs = sess.run(embeddings_op, feed_dict=feed_dict)
+            for j, tmp_qe in enumerate(tmp_query_vecs):
+                query_vecs[i * cf.eval_batch_size + j] = tmp_qe
+
+        db_steps = int(len(db) / cf.eval_batch_size)
+        if len(db) % cf.eval_batch_size > 0:
+            db_steps += 1
+
+        reference_vecs = np.zeros((len(db), int(cf.embedding_size)))
+
+        for i in range(db_steps):
+            db_imgs = sess.run(features_db)
+            feed_dict = {images_ph: db_imgs}
+            tmp_db_vecs = sess.run(embeddings_op, feed_dict=feed_dict)
+            for j, tmp_qe in enumerate(tmp_db_vecs):
+                reference_vecs[i * cf.eval_batch_size + j] = tmp_qe
 
         print('inference start')
 
         # inference
         # caching db output, db inference
-        db_output = './db_infer.pkl'
-        if os.path.exists(db_output):
-            with open(db_output, 'rb') as f:
-                reference_vecs = pickle.load(f)
-        else:
-            feed_dict = {images_ph: db_imgs}
-            reference_vecs = sess.run(embeddings_op, feed_dict=feed_dict)
-            with open(db_output, 'wb') as f:
-                pickle.dump(reference_vecs, f)
 
         # l2 normalization
         query_vecs = l2_normalize(query_vecs)
@@ -240,7 +250,8 @@ if __name__ == '__main__':
     # tf.set_random_seed(123)
     if cf.mode == 'train':
         train_dataset_path = DATASET_PATH + '/train/train_data'
-        tb.make_tfrecords("ir_ph1_v2", "train", train_dataset_path, "./dataset/train/", 4, 3, False)
+        # tb.make_tfrecords("ir_ph1_v2", "train", train_dataset_path, "./dataset/train/", 4, 3, False)
+        tb.make_tfrecords("ir_ph1_v2", "train", train_dataset_path, "/tmp/igseo_tfrecord", 4, 3, False)
 
         files = glob.glob("./dataset/train/*_train*tfrecord")
         print(files)

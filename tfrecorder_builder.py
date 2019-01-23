@@ -240,14 +240,14 @@ def make_tfrecords(dataset_name, phase_name, image_dir, output_dir, num_shards, 
 if __name__ == '__main__':
     fl = tf.app.flags
     fl.DEFINE_boolean('parallel_exec', False, '')
-    fl.DEFINE_boolean('multiple', True, '')
+    fl.DEFINE_boolean('multiple', False, '')
 
-    fl.DEFINE_string('dataset_name', "fashionstyle14", "")
+    fl.DEFINE_string('dataset_name', "cafe24product", "")
     fl.DEFINE_string('phase_name', "train", "")
     fl.DEFINE_string('image_dir',
-                     'D:/data/fashion/image_retrieval/images_for_tfrecord/warehouse2shopall', '')
+                     'E:\cafe24bak\outbackup_d\dataset\cafe24product_test\dataset_test\query', '')
     fl.DEFINE_string('tfrecord_output',
-                     'D:/data/fashion/image_retrieval/images_for_tfrecord/warehouse2shopall_tfrecord',
+                     'E:\cafe24bak\outbackup_d\dataset\cafe24product_test',
                      '')
     fl.DEFINE_string('attr_path',
                      None,

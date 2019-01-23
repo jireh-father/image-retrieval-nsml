@@ -11,6 +11,7 @@ import nsml
 import tfrecorder_builder as tb
 from nsml import DATASET_PATH
 import pickle
+from scipy.spatial import distance
 
 slim = tf.contrib.slim
 
@@ -31,7 +32,7 @@ fl.DEFINE_boolean('test', False, '')
 #######################
 
 fl.DEFINE_string('model_name', 'inception_resnet_v2', '')
-fl.DEFINE_string('preprocessing_name', 'inception', '')
+fl.DEFINE_string('preprocessing_name', None, '')
 fl.DEFINE_integer('batch_size', 64, '')
 fl.DEFINE_boolean('use_pair_sampling', True, '')
 fl.DEFINE_integer('sampling_buffer_size', 300, '')
@@ -67,8 +68,8 @@ fl.DEFINE_float('ftrl_learning_rate_power', -0.5, 'The learning rate power.')
 fl.DEFINE_float('ftrl_initial_accumulator_value', 0.1, 'Starting value for the FTRL accumulators.')
 fl.DEFINE_float('ftrl_l1', 0.0, 'The FTRL l1 regularization strength.')
 fl.DEFINE_float('ftrl_l2', 0.0, 'The FTRL l2 regularization strength.')
-# fl.DEFINE_float('momentum', 0.9, 'The momentum for the MomentumOptimizer and RMSPropOptimizer.')
-fl.DEFINE_float('momentum', 0.8, 'The momentum for the MomentumOptimizer and RMSPropOptimizer.')
+fl.DEFINE_float('momentum', 0.9, 'The momentum for the MomentumOptimizer and RMSPropOptimizer.')
+# fl.DEFINE_float('momentum', 0.8, 'The momentum for the MomentumOptimizer and RMSPropOptimizer.')
 fl.DEFINE_float('rmsprop_momentum', 0.9, 'Momentum.')
 fl.DEFINE_float('rmsprop_decay', 0.9, 'Decay term for RMSProp.')
 
@@ -183,21 +184,15 @@ def bind_model(saver, sess, images_ph, embeddings_op, cf):
 
         print('inference start')
 
-        # inference
-        # caching db output, db inference
-        db_output = './db_infer.pkl'
-        if os.path.exists(db_output):
-            with open(db_output, 'rb') as f:
-                reference_vecs = pickle.load(f)
-        else:
-            feed_dict = {images_ph: db_imgs}
-            reference_vecs = sess.run(embeddings_op, feed_dict=feed_dict)
-            with open(db_output, 'wb') as f:
-                pickle.dump(reference_vecs, f)
-        dot_product = np.matmul(query_vecs, np.transpose(reference_vecs))
-        square_norm = np.diag(dot_product)
-        distances = np.expand_dims(square_norm, 1) - 2.0 * dot_product + np.expand_dims(square_norm, 0)
-        sim_matrix = np.maximum(distances, 0.0)
+        feed_dict = {images_ph: db_imgs}
+        reference_vecs = sess.run(embeddings_op, feed_dict=feed_dict)
+
+        sim_matrix = distance.cdist(query_vecs, reference_vecs, 'euclidean')
+
+        # dot_product = np.matmul(query_vecs, np.transpose(reference_vecs))
+        # square_norm = np.diag(dot_product)
+        # distances = np.expand_dims(square_norm, 1) - 2.0 * dot_product + np.expand_dims(square_norm, 0)
+        # sim_matrix = np.maximum(distances, 0.0)
         # l2 normalization
         # query_vecs = l2_normalize(query_vecs)
         # reference_vecs = l2_normalize(reference_vecs)

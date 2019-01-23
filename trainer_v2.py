@@ -215,21 +215,17 @@ def bind_model(saver, sess, cf):
             reference_vecs = l2_normalize(reference_vecs)
 
             # Calculate cosine similarity
-            if sim_matrix is None:
-                sim_matrix = np.dot(query_vecs, reference_vecs.T)
-            else:
-                sim_matrix += np.dot(query_vecs, reference_vecs.T)
-        sim_matrix /= len(checkpoints)
-        retrieval_results = {}
+            sim_matrix = np.dot(query_vecs, reference_vecs.T)
+            retrieval_results = {}
 
-        for (i, query) in enumerate(queries):
-            query = query.split('/')[-1].split('.')[0]
-            sim_list = zip(db, sim_matrix[i].tolist())
-            sorted_sim_list = sorted(sim_list, key=lambda x: x[1], reverse=True)
+            for (i, query) in enumerate(queries):
+                query = query.split('/')[-1].split('.')[0]
+                sim_list = zip(db, sim_matrix[i].tolist())
+                sorted_sim_list = sorted(sim_list, key=lambda x: x[1], reverse=True)
 
-            ranked_list = [k.split('/')[-1].split('.')[0] for (k, v) in sorted_sim_list]  # ranked list
+                ranked_list = [k.split('/')[-1].split('.')[0] for (k, v) in sorted_sim_list]  # ranked list
 
-            retrieval_results[query] = ranked_list
+                retrieval_results[query] = ranked_list
         print('done')
 
         return list(zip(range(len(retrieval_results)), retrieval_results.items()))
