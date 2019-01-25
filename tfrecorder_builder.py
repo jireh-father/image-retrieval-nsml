@@ -33,7 +33,7 @@ def _get_filenames_and_labels(image_dir):
         if os.path.isdir(path):
             directories.append(path)
             class_names.append(filename)
-
+    class_cnt = len(class_names)
     class_names_to_ids = dict(zip(class_names, range(len(class_names))))
 
     photo_filenames = []
@@ -54,7 +54,7 @@ def _get_filenames_and_labels(image_dir):
     for photo_filename in photo_filenames:
         labels.append(class_names_to_ids[os.path.basename(os.path.dirname(photo_filename))])
 
-    return photo_filenames, labels
+    return photo_filenames, labels, class_cnt
 
 
 def _get_filenames_and_classes(image_dir):
@@ -234,9 +234,9 @@ def make_tfrecords_train_test(dataset_name, train_ratio, image_dir, output_dir, 
 
 
 def get_filenames_and_labels(image_dir):
-    photo_filenames, labels = _get_filenames_and_labels(image_dir)
+    photo_filenames, labels, class_cnt = _get_filenames_and_labels(image_dir)
 
-    return photo_filenames, labels
+    return photo_filenames, labels, class_cnt
 
 
 def make_tfrecords(dataset_name, phase_name, image_dir, output_dir, num_shards, num_channels, remove_images,

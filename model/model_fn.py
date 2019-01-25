@@ -88,7 +88,8 @@ def _configure_optimizer(learning_rate, cf):
         optimizer = tf.train.MomentumOptimizer(
             learning_rate,
             momentum=cf.momentum,
-            name='Momentum')
+            name='Momentum',
+            use_nesterov=cf.use_nesterov)
     elif cf.optimizer == 'rmsprop':
         optimizer = tf.train.RMSPropOptimizer(
             learning_rate,
@@ -102,11 +103,15 @@ def _configure_optimizer(learning_rate, cf):
     return optimizer
 
 
-def build_slim_model(is_training, images, params):
+def build_slim_model(is_training, images, params, class_cnt=None):
     wd = 0.
     if hasattr(params, "weight_decay"):
         wd = params.weight_decay
-    model_f = nets_factory.get_network_fn(params.model_name, int(params.embedding_size), wd,
+    if params.use_crossentropy:
+        num_classes = [int(params.embedding_size), class_cnt]
+    else:
+        num_classes = int(params.embedding_size)
+    model_f = nets_factory.get_network_fn(params.model_name, num_classes, wd,
                                           is_training=is_training)
     out, end_points = model_f(images)
 
@@ -154,10 +159,10 @@ def train_op_fun(total_loss, global_step, num_examples, cf):
     return train_op
 
 
-def build_model(features, labels=None, cf=None, is_training=True, num_examples=None, global_step=None):
+def build_model(features, labels=None, cf=None, is_training=True, num_examples=None, global_step=None, class_cnt=None):
     images = features
 
-    embeddings, end_points = build_slim_model(is_training, images, cf)
+    embeddings, end_points = build_slim_model(is_training, images, cf, class_cnt)
 
     if not is_training:
         return embeddings
@@ -189,6 +194,11 @@ def build_model(features, labels=None, cf=None, is_training=True, num_examples=N
         raise ValueError("Triplet strategy not recognized: {}".format(cf.triplet_strategy))
 
     vars = tf.trainable_variables()
+
+    if cf.use_crossentropy:
+        loss += tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits_v2(labels=tf.one_hot(labels, class_cnt),
+                                                                          logits=end_points['Logits2']))
+
     loss += tf.add_n([tf.nn.l2_loss(v) for v in vars if 'bias' not in v.name]) * cf.weight_decay
 
     train_op = train_op_fun(loss, global_step, num_examples, cf)

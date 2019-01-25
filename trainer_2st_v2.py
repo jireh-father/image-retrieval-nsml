@@ -26,13 +26,14 @@ fl.DEFINE_string('mode', 'train', 'submit일때 해당값이 test로 설정됩�
 fl.DEFINE_string('iteration', '0',
                  'fork 명령어를 입력할때의 체크포인트로 설정됩니다. 체크포인트 옵션을 안주면 마지막 wall time 의 model 을 가져옵니다.')
 fl.DEFINE_integer('pause', 0, 'model 을 load 할때 1로 설정됩니다.')
-fl.DEFINE_boolean('test', True, '')
+fl.DEFINE_boolean('test', False, '')
 
 #######################
 # Dataset Flags #
 #######################
 
 fl.DEFINE_string('model_name', 'inception_resnet_v2', '')
+fl.DEFINE_boolean('use_crossentropy', False, '')
 fl.DEFINE_string('preprocessing_name', 'inception', '')
 fl.DEFINE_integer('batch_size', 64, '')
 fl.DEFINE_integer('eval_batch_size', 128, '')
@@ -52,7 +53,9 @@ fl.DEFINE_string('triplet_strategy', 'semihard', '')
 fl.DEFINE_float('margin', 0.5, '')
 fl.DEFINE_boolean('squared', False, '')
 fl.DEFINE_boolean('l2norm', True, '')
-fl.DEFINE_integer('leaf_size', 5, '')
+fl.DEFINE_string('ann_algorithm', 'balltree', 'kdtree,balltree')
+fl.DEFINE_string('ann_metric', 'euclidean', 'euclidean,minkowski')
+fl.DEFINE_integer('leaf_size', 10, '')
 
 ######################
 # Optimization Flags #
@@ -72,6 +75,7 @@ fl.DEFINE_float('ftrl_initial_accumulator_value', 0.1, 'Starting value for the F
 fl.DEFINE_float('ftrl_l1', 0.0, 'The FTRL l1 regularization strength.')
 fl.DEFINE_float('ftrl_l2', 0.0, 'The FTRL l2 regularization strength.')
 fl.DEFINE_float('momentum', 0.9, 'The momentum for the MomentumOptimizer and RMSPropOptimizer.')
+fl.DEFINE_boolean('use_nesterov', True, 'use_nesterov')
 # fl.DEFINE_float('momentum', 0.5, 'The momentum for the MomentumOptimizer and RMSPropOptimizer.')
 fl.DEFINE_float('rmsprop_momentum', 0.9, 'Momentum.')
 fl.DEFINE_float('rmsprop_decay', 0.9, 'Decay term for RMSProp.')
@@ -79,7 +83,7 @@ fl.DEFINE_float('rmsprop_decay', 0.9, 'Decay term for RMSProp.')
 #######################
 # Learning Rate Flags #
 #######################
-fl.DEFINE_string('learning_rate_decay_type', 'exponential', '"fixed", "exponential",'' or "polynomial"')
+fl.DEFINE_string('learning_rate_decay_type', 'fixed', '"fixed", "exponential",'' or "polynomial"')
 # fl.DEFINE_float('learning_rate', 0.01, 'Initial learning rate.')
 # fl.DEFINE_float('learning_rate', 0.1, 'Initial learning rate.')
 # fl.DEFINE_float('learning_rate', 0.000754, 'Initial learning rate.')
@@ -94,10 +98,10 @@ fl.DEFINE_float('moving_average_decay', None, 'The decay to use for the moving a
 #####################
 # Fine-Tuning Flags #
 #####################
-fl.DEFINE_string('nsml_checkpoint', '3', '')
-fl.DEFINE_string('nsml_session', 'jireh_family/ir_ph2/11', '')
-# fl.DEFINE_string('nsml_checkpoint', None, '')
-# fl.DEFINE_string('nsml_session', None, '')
+# fl.DEFINE_string('nsml_checkpoint', '24', '')
+# fl.DEFINE_string('nsml_session', 'jireh_family/ir_ph2/11', '')
+fl.DEFINE_string('nsml_checkpoint', None, '')
+fl.DEFINE_string('nsml_session', None, '')
 fl.DEFINE_boolean('fine_tuning', True, '')
 fl.DEFINE_string('checkpoint_path', "./pretrained/inception_resnet_v2_2016_08_30.ckpt", '')
 # fl.DEFINE_string('checkpoint_path', None, '')
@@ -115,14 +119,16 @@ pretrained_map = {
     "pnasnet_large": "https://storage.googleapis.com/download.tensorflow.org/models/pnasnet-5_large_2017_12_13.tar.gz",
     "inception_resnet_v2": "http://download.tensorflow.org/models/inception_resnet_v2_2016_08_30.tar.gz",
     "resnet_v2_152": "http://download.tensorflow.org/models/resnet_v2_152_2017_04_14.tar.gz",
-    "nasnet_large": "https://storage.googleapis.com/download.tensorflow.org/models/nasnet-a_large_04_10_2017.tar.gz"
+    "nasnet_large": "https://storage.googleapis.com/download.tensorflow.org/models/nasnet-a_large_04_10_2017.tar.gz",
+    "inception_v1": "http://download.tensorflow.org/models/inception_v1_2016_08_28.tar.gz"
 }
 
 pretrained_filename_map = {
     "pnasnet_large": "model.ckpt",
     "nasnet_large": "model.ckpt",
     "inception_resnet_v2": "inception_resnet_v2_2016_08_30.ckpt",
-    "resnet_v2_152": "resnet_v2_152.ckpt"
+    "resnet_v2_152": "resnet_v2_152.ckpt",
+    "inception_v1": "inception_v1.ckpt"
 }
 
 checkpoint_exclude_scopes_map = {
@@ -130,6 +136,7 @@ checkpoint_exclude_scopes_map = {
     "nasnet_large": "aux_7/aux_logits/FC,final_layer/FC",
     "inception_resnet_v2": "InceptionResnetV2/Logits,InceptionResnetV2/AuxLogits",
     "resnet_v2_152": "resnet_v2_152/logits",
+    "inception_v1": "InceptionV1/Logits"
 }
 
 
@@ -217,13 +224,12 @@ def bind_model(saver, sess, images_ph, embeddings_op, cf):
         query_vecs = l2_normalize(query_vecs)
         reference_vecs = l2_normalize(reference_vecs)
 
-        # kdt = KDTree(reference_vecs, leaf_size=30, metric='euclidean')
-        #
-        # kdt.query(query_vecs, k=2, return_distance=False)
-
-        tree = BallTree(reference_vecs, leaf_size=cf.leaf_size)
         k = len(queries) if len(queries) < 1000 else 1000
-        _, index_list = tree.query(query_vecs, k=k)
+        if cf.ann_algorithm == "kdtree":
+            tree = KDTree(reference_vecs, leaf_size=30, metric=cf.ann_metric)
+        elif cf.ann_algorithm == "balltree":
+            tree = BallTree(reference_vecs, leaf_size=cf.leaf_size, metric=cf.ann_metric)
+        index_list = tree.query(query_vecs, k=k, return_distance=False)
 
         retrieval_results = {}
         print("searched")
@@ -255,11 +261,7 @@ if __name__ == '__main__':
     # tf.set_random_seed(123)
     if cf.mode == 'train':
         train_dataset_path = DATASET_PATH + '/train/train_data'
-        file_names, labels = tb.get_filenames_and_labels(train_dataset_path)
-        print("files", len(file_names))
-        print("labels", len(labels))
-        print(file_names[:10])
-        print(labels[:10])
+        file_names, labels, class_cnt = tb.get_filenames_and_labels(train_dataset_path)
         num_examples = len(file_names)
         global_step = tf.Variable(0, trainable=False)
 
@@ -319,10 +321,10 @@ if __name__ == '__main__':
     if cf.mode == 'train':
         if cf.use_pair_sampling:
             loss_op, end_points, train_op, embeddings_op = model_fn.build_model(images_ph, labels_ph, cf, True,
-                                                                                num_examples, global_step)
+                                                                                num_examples, global_step, class_cnt)
         else:
             loss_op, end_points, train_op, embeddings_op = model_fn.build_model(images, labels, cf, True, num_examples,
-                                                                                global_step)
+                                                                                global_step, class_cnt)
     else:
         embeddings_op = model_fn.build_model(images_ph, labels_ph, cf, is_training=False)
 
@@ -388,7 +390,6 @@ if __name__ == '__main__':
                     start = time.time()
 
                     if cf.use_pair_sampling:
-                        print("pair sampling")
                         tmp_images, tmp_labels = sess.run([images, labels])
                         pair_indices = set()
                         single_index_map = {}
@@ -403,13 +404,15 @@ if __name__ == '__main__':
                                 label_buffer[tmp_label] = i
                                 single_index_map[tmp_label] = i
                         pair_indices = list(pair_indices)
-                        print(len(pair_indices))
+                        # print(len(pair_indices))
+
                         if len(pair_indices) > cf.batch_size:
                             pair_indices = pair_indices[:cf.batch_size]
                         elif len(pair_indices) < cf.batch_size:
                             pair_indices += list(single_index_map.values())[:cf.batch_size - len(pair_indices)]
                         batch_images = tmp_images[pair_indices]
                         batch_labels = tmp_labels[pair_indices]
+                        # print(len(np.unique(batch_labels)) / cf.batch_size)
                     else:
                         print("not pair sampling")
                     sampling_time = time.time() - start
@@ -422,14 +425,12 @@ if __name__ == '__main__':
                     else:
                         loss, _ = sess.run([loss_op, train_op])
                     train_time = time.time() - start
-
                     if steps % cf.log_every_n_steps == 0:
                         now = datetime.now().strftime('%Y/%m/%d %H:%M:%S')
                         print("[%s: %d epoch(%d/%d), %d steps] sampling time: %f, train time: %f, loss: %f" % (
                             now, epoch, steps % steps_each_epoch, steps_each_epoch, steps, sampling_time, train_time,
                             loss))
                     num_trained_images += cf.batch_size
-
                     steps += 1
                     if num_trained_images >= num_examples:
                         # nsml.report(summary=True, epoch=epoch, epoch_total=cf.max_number_of_epochs, loss=loss)
@@ -441,7 +442,6 @@ if __name__ == '__main__':
                             break
                         epoch += 1
                         num_trained_images = 0
-
                 except tf.errors.OutOfRangeError:
                     break
     print("end!!")
