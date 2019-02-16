@@ -4,6 +4,9 @@ import tensorflow as tf
 
 from model.triplet_loss import batch_all_triplet_loss
 from model.triplet_loss import batch_hard_triplet_loss
+from model.focal_triplet_loss import batch_all_triplet_loss as all_triplet_focal_loss
+from model.focal_triplet_loss import batch_hard_triplet_loss as hard_triplet_focal_loss
+from model.focal_triplet_loss_tf import triplet_semihard_loss as semihard_triplet_focal_loss
 from model import nets_factory
 
 slim = tf.contrib.slim
@@ -113,7 +116,7 @@ def build_slim_model(is_training, images, params, class_cnt=None):
         num_classes = int(params.embedding_size)
     model_f = nets_factory.get_network_fn(params.model_name, num_classes, wd,
                                           is_training=is_training)
-    out, end_points = model_f(images)
+    out, end_points = model_f(images, create_aux_logits=False)
 
     return out, end_points
 
@@ -159,7 +162,8 @@ def train_op_fun(total_loss, global_step, num_examples, cf):
     return train_op
 
 
-def build_model(features, labels=None, cf=None, is_training=True, num_examples=None, global_step=None, class_cnt=None):
+def build_model(features, labels=None, cf=None, is_training=True, num_examples=None, global_step=None, class_cnt=None,
+                anchor_indices=None, positive_indices=None):
     images = features
 
     embeddings, end_points = build_slim_model(is_training, images, cf, class_cnt)
@@ -167,39 +171,88 @@ def build_model(features, labels=None, cf=None, is_training=True, num_examples=N
     if not is_training:
         return embeddings
 
-    if cf.l2norm:
-        embeddings = tf.nn.l2_normalize(embeddings, axis=1)
+    # if cf.l2norm:
+    #     embeddings = tf.nn.l2_normalize(embeddings, axis=1)
 
     labels = tf.cast(labels, tf.int64)
 
-    # Define triplet loss
-    if cf.triplet_strategy == "batch_all":
-        loss = batch_all_triplet_loss(labels, embeddings, margin=cf.margin, squared=cf.squared)
-    elif cf.triplet_strategy == "batch_hard":
-        loss = batch_hard_triplet_loss(labels, embeddings, margin=cf.margin, squared=cf.squared)
-    elif cf.triplet_strategy == "semihard":
-        loss = tf.contrib.losses.metric_learning.triplet_semihard_loss(labels, embeddings, margin=cf.margin)
-    elif cf.triplet_strategy == "cluster":
-        loss = tf.contrib.losses.metric_learning.cluster_loss(labels, embeddings, 1.0)
-    elif cf.triplet_strategy == "contrastive":
-        pass
-    elif cf.triplet_strategy == "lifted_struct":
-        loss = tf.contrib.losses.metric_learning.lifted_struct_loss(labels, embeddings, margin=cf.margin)
-    elif cf.triplet_strategy == "npairs":
-        tf.contrib.losses.metric_learning.npairs
-        pass
-    elif cf.triplet_strategy == "npairs_multilabel":
-        pass
+    if cf.use_all_loss:
+        loss = tf.contrib.losses.metric_learning.lifted_struct_loss(labels, end_points['lifted_struct'],
+                                                                    margin=cf.margin)
+        embeddings = tf.nn.l2_normalize(embeddings, axis=1)
+        loss += tf.contrib.losses.metric_learning.triplet_semihard_loss(labels, embeddings, margin=cf.margin)
+        if anchor_indices is not None and positive_indices is not None:
+            anchor_embeddings = tf.gather_nd(end_points['npairs'], anchor_indices)
+            anchor_labels = tf.gather_nd(labels, anchor_indices)
+            positive_embeddings = tf.gather_nd(end_points['npairs'], positive_indices)
+
+            loss += tf.contrib.losses.metric_learning.npairs_loss(anchor_labels, anchor_embeddings, positive_embeddings,
+                                                                  reg_lambda=0.)
+
+            # anchor_embeddings = tf.gather_nd(end_points['contrastive'], anchor_indices)
+            # positive_embeddings = tf.gather_nd(end_points['contrastive'], positive_indices)
+            # anchor_embeddings = tf.nn.l2_normalize(anchor_embeddings, axis=1)
+            # positive_embeddings = tf.nn.l2_normalize(positive_embeddings, axis=1)
+            # loss += tf.contrib.losses.metric_learning.contrastive_loss(anchor_labels, anchor_embeddings,
+            #                                                            positive_embeddings,
+            #                                                            margin=cf.margin)
     else:
-        raise ValueError("Triplet strategy not recognized: {}".format(cf.triplet_strategy))
+        if anchor_indices is not None and positive_indices is not None:
+            anchor_embeddings = tf.gather_nd(embeddings, anchor_indices)
+            anchor_labels = tf.gather_nd(labels, anchor_indices)
+            positive_embeddings = tf.gather_nd(embeddings, positive_indices)
+            print(anchor_embeddings, anchor_labels)
+        # Define triplet loss
+
+        if cf.triplet_strategy == "batch_all":
+            if cf.use_focal_loss:
+                loss = all_triplet_focal_loss(labels, embeddings, margin=cf.margin, squared=cf.squared,
+                                              sigma=cf.focal_loss_sigma)
+            else:
+                loss = batch_all_triplet_loss(labels, embeddings, margin=cf.margin, squared=cf.squared)
+
+        elif cf.triplet_strategy == "batch_hard":
+            if cf.use_focal_loss:
+                loss = hard_triplet_focal_loss(labels, embeddings, margin=cf.margin, squared=cf.squared,
+                                               sigma=cf.focal_loss_sigma)
+            else:
+                loss = batch_hard_triplet_loss(labels, embeddings, margin=cf.margin, squared=cf.squared)
+
+        elif cf.triplet_strategy == "semihard":
+            embeddings = tf.nn.l2_normalize(embeddings, axis=1)
+            if cf.use_focal_loss:
+                loss = semihard_triplet_focal_loss(labels, embeddings, margin=cf.margin, sigma=cf.focal_loss_sigma)
+            else:
+                loss = tf.contrib.losses.metric_learning.triplet_semihard_loss(labels, embeddings, margin=cf.margin)
+
+        elif cf.triplet_strategy == "cluster":
+            embeddings = tf.nn.l2_normalize(embeddings, axis=1)
+            loss = tf.contrib.losses.metric_learning.cluster_loss(labels, embeddings, 1.0)
+        elif cf.triplet_strategy == "contrastive":
+            assert anchor_indices is not None and positive_indices is not None
+            anchor_embeddings = tf.nn.l2_normalize(anchor_embeddings, axis=1)
+            positive_embeddings = tf.nn.l2_normalize(positive_embeddings, axis=1)
+            loss = tf.contrib.losses.metric_learning.contrastive_loss(anchor_labels, anchor_embeddings,
+                                                                      positive_embeddings,
+                                                                      margin=cf.margin)
+        elif cf.triplet_strategy == "lifted_struct":
+            loss = tf.contrib.losses.metric_learning.lifted_struct_loss(labels, embeddings, margin=cf.margin)
+        elif cf.triplet_strategy == "npairs":
+            assert anchor_indices is not None and positive_indices is not None
+            loss = tf.contrib.losses.metric_learning.npairs_loss(anchor_labels, anchor_embeddings, positive_embeddings,
+                                                                 reg_lambda=0.)
+        elif cf.triplet_strategy == "npairs_multilabel":
+            pass
+        else:
+            raise ValueError("Triplet strategy not recognized: {}".format(cf.triplet_strategy))
 
     vars = tf.trainable_variables()
 
     if cf.use_crossentropy:
         loss += tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits_v2(labels=tf.one_hot(labels, class_cnt),
                                                                           logits=end_points['Logits2']))
-
-    loss += tf.add_n([tf.nn.l2_loss(v) for v in vars if 'bias' not in v.name]) * cf.weight_decay
+    if cf.weight_decay is not None:
+        loss += tf.add_n([tf.nn.l2_loss(v) for v in vars if 'bias' not in v.name]) * cf.weight_decay
 
     train_op = train_op_fun(loss, global_step, num_examples, cf)
 

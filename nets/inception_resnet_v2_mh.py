@@ -287,12 +287,12 @@ def inception_resnet_v2_base(inputs,
         raise ValueError('final_endpoint (%s) not recognized', final_endpoint)
 
 
-def inception_resnet_v2(inputs, num_classes=1001, is_training=True,
-                        dropout_keep_prob=0.8,
-                        reuse=None,
-                        scope='InceptionResnetV2',
-                        create_aux_logits=True,
-                        activation_fn=tf.nn.relu):
+def inception_resnet_v2_mh(inputs, num_classes=1001, is_training=True,
+                           dropout_keep_prob=0.8,
+                           reuse=None,
+                           scope='InceptionResnetV2',
+                           create_aux_logits=True,
+                           activation_fn=tf.nn.relu):
     """Creates the Inception Resnet V2 model.
 
     Args:
@@ -335,9 +335,18 @@ def inception_resnet_v2(inputs, num_classes=1001, is_training=True,
                     aux = slim.conv2d(aux, 768, aux.get_shape()[1:3],
                                       padding='VALID', scope='Conv2d_2a_5x5')
                     aux = slim.flatten(aux)
-                    aux = slim.fully_connected(aux, num_classes, activation_fn=None,
-                                               scope='Logits')
-                    end_points['AuxLogits'] = aux
+                    if isinstance(num_classes, list):
+                        aux = slim.fully_connected(aux, num_classes[0], activation_fn=None,
+                                                   scope='Logits')
+                        end_points['AuxLogits'] = aux
+
+                        aux = slim.fully_connected(aux, num_classes[1], activation_fn=None,
+                                                   scope='Logits2')
+                        end_points['AuxLogits2'] = aux
+                    else:
+                        aux = slim.fully_connected(aux, num_classes, activation_fn=None,
+                                                   scope='Logits')
+                        end_points['AuxLogits'] = aux
 
             with tf.variable_scope('Logits'):
                 # TODO(sguada,arnoegw): Consider adding a parameter global_pool which
@@ -351,7 +360,7 @@ def inception_resnet_v2(inputs, num_classes=1001, is_training=True,
                 end_points['global_pool'] = net
                 if not num_classes:
                     return net, end_points
-                # net = slim.flatten(net)
+                net = slim.flatten(net)
                 # 1536 dim
                 # 1383 output
 
@@ -376,58 +385,89 @@ def inception_resnet_v2(inputs, num_classes=1001, is_training=True,
                 # net = slim.dropout(net, dropout_keep_prob, is_training=is_training)
                 # net = slim.fully_connected(net, 480, activation_fn=tf.nn.relu)
                 if isinstance(num_classes, list):
-                    ####### all conv
-                    # avg_pool_net = slim.avg_pool2d(net, 5, stride=3, padding='VALID',
-                    #                                scope='Conv2d_1a_3x3')
+                    ####### weird fc 2 , 2 heads
+                    num_hidden_units = 832
                     tmp_net = net
-                    ### head 1
-                    net = slim.conv2d(tmp_net, 128, 1, scope='Conv2d_1b_1x1')
-                    net = slim.conv2d(net, 768, net.get_shape()[1:3],
-                                      padding='VALID', scope='Conv2d_2a_5x5')
-                    net = slim.flatten(net)
+                    # triplet
+                    net = slim.dropout(tmp_net, dropout_keep_prob, is_training=is_training,
+                                       scope='Dropout1_0')
+                    net = slim.fully_connected(net, num_hidden_units, activation_fn=None,
+                                               scope='Logits1_0')
+
                     net = slim.dropout(net, dropout_keep_prob, is_training=is_training,
-                                       scope='Dropout_1')
+                                       scope='Dropout')
                     logits = slim.fully_connected(net, num_classes[0], activation_fn=None,
                                                   scope='Logits')
                     end_points['Logits'] = logits
-                    ### head 2
-                    net = slim.conv2d(tmp_net, 128, 1, scope='Conv2d_1b_1x1_2')
-                    net = slim.conv2d(net, 768, net.get_shape()[1:3],
-                                      padding='VALID', scope='Conv2d_2a_5x5_2')
-                    net = slim.flatten(net)
+
+                    # classification
                     net = slim.dropout(net, dropout_keep_prob, is_training=is_training,
-                                       scope='Dropout_2')
-                    net = slim.fully_connected(net, num_classes[1], activation_fn=None,
-                                               scope='Logits_2')
-                    end_points['Logits2'] = net
+                                       scope='Dropout2_1')
+                    net = slim.fully_connected(net, 1460, activation_fn=None,
+                                               scope='Logits2_1')
 
-                    ####### weird fc 2 , 2 heads
-                    # net = slim.dropout(net, dropout_keep_prob, is_training=is_training,
-                    #                    scope='Dropout1_0')
-                    # net = slim.fully_connected(net, 832, activation_fn=None,
-                    #                            scope='Logits1_0')
-                    #
-                    # net = slim.dropout(net, dropout_keep_prob, is_training=is_training,
-                    #                    scope='Dropout')
-                    # logits = slim.fully_connected(net, num_classes[0], activation_fn=None,
-                    #                               scope='Logits')
-                    # end_points['Logits'] = logits
-                    # end_points['Predictions'] = tf.nn.softmax(logits, name='Predictions')
-                    #
-                    # net = slim.dropout(net, dropout_keep_prob, is_training=is_training,
-                    #                    scope='Dropout2_1')
-                    # # end_points['PreLogitsFlatten2'] = net
-                    # net = slim.fully_connected(net, 1460, activation_fn=None,
-                    #                            scope='Logits2_1')
-                    #
-                    # net = slim.dropout(net, dropout_keep_prob, is_training=is_training,
-                    #                    scope='Dropout2_2')
-                    # logits2 = slim.fully_connected(net, num_classes[1], activation_fn=None,
-                    #                                scope='Logits2_2')
-                    #
-                    # end_points['Logits2'] = logits2
-                    # end_points['Predictions2'] = tf.nn.softmax(logits, name='Predictions2')
+                    net = slim.dropout(net, dropout_keep_prob, is_training=is_training,
+                                       scope='Dropout2_2')
+                    logits2 = slim.fully_connected(net, num_classes[1], activation_fn=None,
+                                                   scope='Logits2_2')
 
+                    end_points['Logits2'] = logits2
+
+                    # lifted
+                    with tf.variable_scope('lifted_struct'):
+                        net = slim.dropout(tmp_net, dropout_keep_prob, is_training=is_training,
+                                           scope='Dropout2_1')
+                        net = slim.fully_connected(net, num_hidden_units, activation_fn=None,
+                                                   scope='Logits2_1')
+
+                        net = slim.dropout(net, dropout_keep_prob, is_training=is_training,
+                                           scope='Dropout2_2')
+                        logits2 = slim.fully_connected(net, num_classes[0], activation_fn=None,
+                                                       scope='Logits2_2')
+
+                        end_points['lifted_struct'] = logits2
+
+                    # npair
+                    with tf.variable_scope('npairs'):
+                        net = slim.dropout(tmp_net, dropout_keep_prob, is_training=is_training,
+                                           scope='Dropout2_1')
+                        net = slim.fully_connected(net, num_hidden_units, activation_fn=None,
+                                                   scope='Logits2_1')
+
+                        net = slim.dropout(net, dropout_keep_prob, is_training=is_training,
+                                           scope='Dropout2_2')
+                        logits2 = slim.fully_connected(net, num_classes[0], activation_fn=None,
+                                                       scope='Logits2_2')
+
+                        end_points['npairs'] = logits2
+
+                    # # cluster
+                    # with tf.variable_scope('cluster'):
+                    #     net = slim.dropout(tmp_net, dropout_keep_prob, is_training=is_training,
+                    #                        scope='Dropout2_1')
+                    #     net = slim.fully_connected(net, num_hidden_units, activation_fn=None,
+                    #                                scope='Logits2_1')
+                    #
+                    #     net = slim.dropout(net, dropout_keep_prob, is_training=is_training,
+                    #                        scope='Dropout2_2')
+                    #     logits2 = slim.fully_connected(net, num_classes[0], activation_fn=None,
+                    #                                    scope='Logits2_2')
+                    #
+                    #     end_points['cluster'] = logits2
+
+                    # contrastive
+                    with tf.variable_scope('contrastive'):
+                        net = slim.dropout(tmp_net, dropout_keep_prob, is_training=is_training,
+                                           scope='Dropout2_1')
+                        net = slim.fully_connected(net, num_hidden_units, activation_fn=None,
+                                                   scope='Logits2_1')
+
+                        net = slim.dropout(net, dropout_keep_prob, is_training=is_training,
+                                           scope='Dropout2_2')
+                        logits2 = slim.fully_connected(net, num_classes[0], activation_fn=None,
+                                                       scope='Logits2_2')
+
+                        end_points['contrastive'] = logits2
                     ####### normal fc 2 , 2 heads
                     # flatten_net = net
                     # net = slim.dropout(flatten_net, dropout_keep_prob, is_training=is_training,
@@ -466,11 +506,11 @@ def inception_resnet_v2(inputs, num_classes=1001, is_training=True,
 
                     end_points['Logits'] = logits
                     end_points['Predictions'] = tf.nn.softmax(logits, name='Predictions')
-        print("logits", logits)
+
         return logits, end_points
 
 
-inception_resnet_v2.default_image_size = 299
+inception_resnet_v2_mh.default_image_size = 299
 
 
 def inception_resnet_v2_arg_scope(

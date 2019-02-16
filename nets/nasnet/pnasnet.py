@@ -146,8 +146,11 @@ def _build_pnasnet_base(images,
         net = nasnet_utils.global_avg_pool(net)
         if add_and_check_endpoint('global_pool', net) or not num_classes:
             return net, end_points
-        net = slim.dropout(net, hparams.dense_dropout_keep_prob, scope='dropout')
-        logits = slim.fully_connected(net, num_classes)
+        if isinstance(num_classes, list):
+            pass
+        else:
+            net = slim.dropout(net, hparams.dense_dropout_keep_prob, scope='dropout')
+            logits = slim.fully_connected(net, num_classes)
 
         if add_and_check_endpoint('Logits', logits):
             return net, end_points
